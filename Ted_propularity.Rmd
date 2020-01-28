@@ -1,0 +1,303 @@
+---
+title: "D37_FinalProject"
+author: "Group 16 /ZEHENG LIN 1002311054/JUNBO LI 1002226085/HAOMING WANG 1001156946/XIAOWEN ZHANG 1002110789/MENGYAO LIU 1002247464/"
+output:
+  pdf_document: default
+---
+## Instruction
+  TED, a nonpartisan and nonprofit organization. TED spreads ideas, primarily via short talks that can be accessed on the internet. As noted on its website, TED was initiated in 1984 as a conference where technology, entertainment, and design ideas were shared. At present, TED Talks cover topics ranging from science to business to global issues.
+  
+  Our analysis in this case study will be focus on the use of inferential techniques to analyze the data. As well, we will consider innovative approaches to measure popularity of the talks, beyond the conventional measure of the number of views of a talk.
+  
+  There are couples of question which we will be answer as the research go alone with the data that has been analysis, our data analysis will mainly focus on solving the following question:
+  1.What characteristics of TED Talks predict their popularity?
+  2.What different ways could you measure the popularity of TED Talks? For example, could you consider the
+    development of a composite measure(s)? Do the characteristics that predict popularity depend on the way that
+    you measure this construct?
+  3.Do the characteristics that predict popularity change over time?
+  4.Do the characteristics that predict popularity differ based on the theme of the TED Talks?
+  
+The TED data has present with total 17 columns in total, and each of the column represent one attribute for the data:
+  1.the number of first level comments made on the talk
+  2.A description of waht the talk is about
+  3.the duration of the talk in seconds
+  4.the TED event where the talk took place
+  5.the Unix timestamp of th filming
+  6.The number of languages in which the talk is available
+  7.the first named speakers in the talk
+  8.the official name of the TED Talk. includes both the title and the speaker
+  9.the number of speakers in the talk
+  10.the Unix timestamp for the publication of the talk on TED.com
+  11.A string dictionaries of the ratings given to the talk and their frequency
+  12.a list of dictionaries of recommended talks to watch next
+  13.the Occup of the main speaker
+  14.the themes associated with the talk
+  15.the title of the talk
+  16.theURL of the talk
+  17.the number of views on the talk
+
+## task allocation
+  1. zeheng lin:
+    analysis the data
+    findind how data can predict the popularity of TED talk
+    
+  2. junbo li:
+    reviewing the analysis data
+    answering the question
+    
+  3. haoming wang:
+    reviewing the analysis data
+    answering the question
+    
+  4. xiaowen zhang:
+    analsis the data
+    getting conclusion for the analysis data
+    
+  5. mengyao liu:
+    analsis the data
+    getting conclusion for the analysis data
+
+
+## loading data
+```{r}
+TEDtalk <- read.csv("/Users/linzehen/Desktop/ted_main.csv",header = TRUE)
+names(TEDtalk)
+```
+
+
+# 1. Perparing the data for question
+
+#### finding the time using current time format
+```{r}
+library(lubridate)
+TEDtalk$published_date <- as.Date(as.character(ymd_hms(as.POSIXct(as.numeric(TEDtalk$published_date),origin = '1970-01-01',tz = "GMT"))),format = "%Y-%m-%d")
+TEDtalk$pub_month <- factor(month.abb[month(TEDtalk$published_date)])
+TEDtalk$pub_year <- year(TEDtalk$published_date)
+```
+
+#### rating check and adjusting the rating catagories
+The coding produce below is use to find out the positive(negative) meaning words from each of the TED show and combind them as positive(negative) category
+
+```{r}
+library(jsonlite)
+library(stringr)
+
+rating_all = TEDtalk$ratings
+word_collecting = c()
+for (i in 1:2550) {
+  temp <- fromJSON(str_replace_all(rating_all[i],"'",'"'))
+  temp$order = i
+  word_collecting = rbind(temp,word_collecting)
+}
+
+unique(word_collecting$name)
+
+negative_meaning_word <- c('Unconvincing','Confusing','Obnoxious','Longwinded')
+positive_meaning_word <- c('Informative','Inspiring','Fascinating','Ingenious','Beautiful','Persuasive','Jaw-dropping','Courageous','Funny')
+
+word_collecting$ratings_type <- ifelse(word_collecting$name %in% unlist(negative_meaning_word),'negative_rate',ifelse(word_collecting$name %in% unlist(positive_meaning_word),'positive_rate',ifelse(word_collecting$name == 'OK','neutral_ratings',' ')))
+
+negative_rate = c()
+positive_rate = c()
+for (i in 1:2550) {
+  temp_negative = word_collecting$count[which(word_collecting$order == i & word_collecting$ratings_type == "negative_rate")]
+  temp_positive = word_collecting$count[which(word_collecting$order == i & word_collecting$ratings_type == "positive_rate")]
+  negative_rate = c(negative_rate,sum(temp_negative))
+  positive_rate = c(positive_rate,sum(temp_positive))
+}
+
+
+#create order for join purpose
+TEDtalk$order = 1:2550
+TEDtalk$positive_rate = positive_rate
+TEDtalk$negative_rate = negative_rate
+
+rating_count <- matrix(c(sum(positive_rate), sum(negative_rate)), nrow = 1)
+colnames(rating_count) <- c("positive_rate", "negative_rate")
+rownames(rating_count) <- c("Sum")
+as.matrix(rating_count)
+```
+
+#### clean tags
+Conducting the tags that is popular in the shows
+```{r}
+library(tidyverse)
+library(tidytext)
+TEDtalk$tags <- TEDtalk$tags %>% str_replace_all('\\[','') %>% str_replace_all('\\]','')   %>% str_replace_all("\\'",' ') %>% str_replace_all(',',' ') %>% tolower()
+
+talk_tags_comb <- unnest_tokens(TEDtalk,tags1,tags) %>% select(order,tags1)
+head(talk_tags_comb,10)
+```
+
+#### producing the top Occup from 1 - 10
+During this section, we will produce the most popular Occup which shows up in the TED shows
+```{r}
+library(tidytext)
+
+#replacing all the ;,/ to blanks
+TEDtalk$speaker_occ <- TEDtalk$speaker_occ %>% str_replace_all('/',' ') %>% str_replace_all(',',' ')   %>% str_replace_all(';',' ') %>% str_replace_all('\\+',' ') %>% tolower()
+
+#Unnesting each Occup
+Occup <- unnest_tokens(TEDtalk,Occup1,speaker_occ) %>% select(order,Occup1)
+
+#stop word list to be removed
+removal <-  c('and','of','in','expert','social','the','for')
+
+#removing stop words and renaming similar words 
+Occup <- Occup %>% subset(!Occup1 %in% removal) %>% mutate(Occup1 = str_replace_all(Occup1, 
+       c("writer" = "author","scientists" = "scientist","researcher" = "scientist","neuroscientist" = "scientist", "professor" = "educator", "scholar" = "educator", "education" = "educator", "teacher" = "educator", "songauthor" = "author","editor" = "author","data" = "data related","analyst" = "data related","statistician" = "data related", "musician" = "artist","singer" = "artist","sing" = "artist","poet" = "artist","actor" = "artist", "comedian" = "artist","playwright" = "artist","media" = "artist","performance" = "artist","guitarist" = "artist", "dancer" = " artist","humorist" = "artist","pianist" = "artist", "violinist" = "artist","magician" = "artist","artists" = "artist","band" = "artist", "director" = "filmmaker", "producer" = "filmmaker", "entrepreneur" = "business","ceo" = "business", "founder" = "business", "psychology" = "psychologist", "physician" = "health", "medical" = "health", "doctor" = "health", "design" = "designer", "designerer" = "designer", "reporter" = "journalist"))) 
+
+Occup_by_rank <- Occup %>% group_by(Occup1) %>% summarise(n = n_distinct(order)) %>% arrange(desc(n))
+top_10 <- Occup_by_rank[1:10,1]
+top_10_rating <- Occup_by_rank[1:10,2]
+
+popular_occ <- cbind(top_10, top_10_rating)
+popular_occ
+```
+
+
+#### Select the data that we only need and modify the levels of well performance
+```{r}
+ted_new <- TEDtalk %>%
+             select(c("order","main_speaker","title","num_speaker","comments","positive_rate","negative_rate","duration","languages","speaker_occ","views","pub_month","pub_year","published_date")) %>%
+             mutate(ratings = positive_rate + negative_rate )
+
+ted_new$rankinge <- 
+  ifelse(between(ted_new$views,quantile(ted_new$views,0),quantile(ted_new$views,0.20)),'Worst',
+  ifelse(between(ted_new$views,quantile(ted_new$views,0.20),quantile(ted_new$views,0.40)),'Bad',
+  ifelse(between(ted_new$views,quantile(ted_new$views,0.40),quantile(ted_new$views,0.60)),'Ok', 
+  ifelse(between(ted_new$views,quantile(ted_new$views,0.60),quantile(ted_new$views,0.80)),'Good',
+  ifelse(ted_new$views > quantile(ted_new$views,0.80),'Best','NA')))))
+
+#adding levels to the column
+ranking_word <- c('Best','Good','Ok','Bad','Worst')
+ted_new$rankinge <- factor(ted_new$rankinge, levels = ranking_word)
+
+ranking <- ted_new %>%
+  group_by(rankinge) %>%
+  summarise(Min_Views = min(views),Max_Views = max(views)) %>%
+  arrange(desc(Min_Views))
+
+ranking
+
+```
+
+
+# What characteristics of TED Talks predict their popularity?
+Speakers Occup, tag, and number of speakers predicts their popularities.
+
+#### 1. Occupation
+Introduction: 
+We assume that the popularity of Ted talks can be affected by speaker Occups. Different Occups have different professional opinion, so the contents of the talk are various among different Occups. For example, Occups like journalist, film inventor, and author like to make speeches about stories with literary emotions, which are not realistic. People are hard to understand their thoughts. However, Occups like scientist, biologist and psychologist have viewpoints that are more realistic and rational, which means that these kinds of talks are much easier for audience to understand. When people find that the talker is more likely professional and scientific, they are more interested in their speeches. In contrast, people generally have less interest in impractical talkers.
+
+```{r warning=FALSE}
+library(wordcloud)
+library(reshape2)
+
+diff_word_count_best <- as.data.frame(ted_new %>% 
+                           subset(rankinge == "Best",select = c(speaker_occ,rankinge)) %>% 
+                           count(speaker_occ, sort = TRUE))
+
+                  wordcloud(words = diff_word_count_best$speaker_occ, freq = diff_word_count_best$n, min.freq = 1,
+                           max.words = 100, random.order = FALSE, rot.per = 0.35, 
+                           colors = brewer.pal(8, "Dark2"))
+diff_word_count_worst <- as.data.frame(ted_new %>% 
+                           subset(rankinge == "Worst",select = c(speaker_occ,rankinge)) %>% 
+                           count(speaker_occ, sort = TRUE))
+
+                  wordcloud(words = diff_word_count_worst$speaker_occ, freq = diff_word_count_worst$n, min.freq = 1,
+                           max.words = 100, random.order = FALSE, rot.per = 0.35, 
+                           colors = brewer.pal(8, "Dark2"))
+
+set.seed(1054)
+ted_new %>% select(speaker_occ,rankinge) %>% 
+  subset(rankinge %in% c('Best','Worst')) %>%
+  group_by(speaker_occ,rankinge) %>%
+  summarise(n = n()) %>% 
+  acast(speaker_occ ~ rankinge, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#F8766D", "#00BFC4"),
+                   max.words = 100)
+```
+Result:
+From the analysis we did in this research, we find out that speaker Occup does not have a major effect on the TED talks popularity, but it has been noticed that the talks are slightly affected by speaker Occups. While there do exist difference among the amount of video view of different speakers, the result shows that some Occups appear in both the best graph as well as the worst graph, such as artist, author and designer. But some of the Occups affect the popularity. For example, psychologists talk is popular and activists talk is less popular. This means the kind of Occups does not have significant effect on the popularity of Ted talks.
+
+#### 2. Tags
+Introduction:
+The popularity of TED talks are significantly impacted by the tags associated with the theme of these talks. This is mainly due to the reason that people might not have enough time to read through the introduction of certain TED talk, while talk tags provide an abstract of certain talks, dividing them into different groups. When readers find tags they are interested in, they are more likely to watch the TED talk, increasing the popularity of this talk. In addition, since people generally prefer positive words with interesting or trending concept, assigning a tag with a very specific or negative word might decrease the popularity of a TED talk. 
+```{r warning=FALSE}
+set.seed(1054)
+talk_tags_comb %>%
+  inner_join(ted_new, by = "order") %>%
+  select(rankinge, tags1) %>%
+  filter(!(tags1 %in% c('global','tedx'))) %>%
+  subset(rankinge %in% c('Best','Worst')) %>%
+  group_by(tags1,rankinge) %>%
+  summarise(n = n())  %>%
+  acast(tags1 ~ rankinge, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#D95F02", "#1B9E77"), max.words = 100)
+```
+Results:
+From the results of our analysis, it can be easily seen that the best TED talks have tags like motivation, goal, success, and leadership. Since many audience of TED talks are typically diligent and leaders in their field of study or work, they tend to prefer TED talks with these tags. Similarly, happiness and love are positive and affirming words, so talks with these tags are often best talks. 
+
+Conversely, the worst TED talks have tags such as disease, social activism, and war. These words are typically related to negative sides in the world, leading to a decreased popularity or rating among audience. Moreover, some sensitive tags like Africa and politics are found to be associated with worst talks as well. One possible reason is that people are conservative when it comes to sensitive issues and might not respond very positively to these talks 
+
+#### 3. Number of Speaker
+Introduction:
+The number of speakers affects the popularity of Ted Talk. The amount of speakers can influence peoples interest in watching the talk or not. At first we assumed that generally, talk shows with more than one presenter could have more perspectives about the topics. Since people may be more interested in seeing the different opinions focusing one problem, these Ted talks will be more popular. 
+```{r}
+ted_new %>% 
+  mutate(No_of_Speakers = ifelse(num_speaker == 1 , '1','>1')) %>%
+  ggplot(aes(x = No_of_Speakers, y = views, fill = No_of_Speakers)) + 
+  geom_boxplot() +
+  scale_y_log10(labels = scales::comma) +
+   theme_minimal()
+```
+result:
+In fact, talks by only one presenter are more popular than co-presented talks. This may because that these talks are more likely to focus on only one point and much more profound while there must be some conversations during co-presented talks and the key point are more possible to be overlooked. When listening to single speakers presentations, audience will not waste time on listening to other perspectives that are not relative. Also, single speakers conduct most of Ted talks, but co-presented talks only contribute to approximately 2.2% of them. This can be explained that since single speakers talks are much more popular than co-presented talks, less and less people are willing to cooperate to present a talk due to small numbers of view. 
+
+# Do the characteristics that predict popularity change over time?
+
+#### Duration
+
+```{r warning=FALSE}
+ted_time_before_2010 = ted_new[which(ted_new$pub_year < 2010),]
+ted_time_2010_2014 = ted_new[which(ted_new$pub_year >= 2010 & ted_new$pub_year < 2014 ),]
+ted_time_after_2014 = ted_new[which(ted_new$pub_year >= 2014),]
+
+set.seed(1054)
+
+talk_tags_comb %>%
+  inner_join(ted_time_before_2010, by = "order") %>%
+  select(rankinge, tags1) %>%
+  filter(!(tags1 %in% c('global','tedx'))) %>%
+  subset(rankinge %in% c('Best','Worst')) %>%
+  group_by(tags1,rankinge) %>%
+  summarise(n = n())  %>%
+  acast(tags1 ~ rankinge, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#F8766D", "#00BFC4"), max.words = 100)
+
+talk_tags_comb %>%
+  inner_join(ted_time_2010_2014, by = "order") %>%
+  select(rankinge, tags1) %>%
+  filter(!(tags1 %in% c('global','tedx'))) %>%
+  subset(rankinge %in% c('Best','Worst')) %>%
+  group_by(tags1,rankinge) %>%
+  summarise(n = n())  %>%
+  acast(tags1 ~ rankinge, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#D95F02", "#1B9E77"), max.words = 100)
+
+talk_tags_comb %>%
+  inner_join(ted_time_after_2014, by = "order") %>%
+  select(rankinge, tags1) %>%
+  filter(!(tags1 %in% c('global','tedx'))) %>%
+  subset(rankinge %in% c('Best','Worst')) %>%
+  group_by(tags1,rankinge) %>%
+  summarise(n = n())  %>%
+  acast(tags1 ~ rankinge, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#D95F02", "#1B9E77"), max.words = 100)
+```
+From the result in the research we have done above, we can easily conclude that characteristics change over time. It is obvious that the most popular tags of the talks before 2010 are psychology, brain, science and education, while the least popular tags of talks are design, technology and art etc. During the period from 2010 to 2014, the most popular tags became into brain, culture, psychology and education, and the least popular tags were art, technology, and oceans. This implies that people changed their favorite topics during years due to the development of the society and science. People changed their views and thoughts and as a result they would like to pay more attention to different topics compared to those in previous years. After 2014 until now, people are more likely to be interested in talks with themes of brain, growth, personal and business rather than art, society and politics. People thoughts will not always stay the same since the world is changing rapidly. In conclusion, the popularity differed over time.
+
+
+# Conclusion
+Speaker Occup does not have a major effect on the TED talk popularity. However, there are still some Occups that are more popular such as psychologist, scientist and author. Occups like activist, designer and politician are less popular.Best talks fall both in single and co-speaker talks however, majority of the best TED talks ( outliers) are single speaker talks.  The tags of the Ted talks also affect the popularity a lot. The worst TED talks tags are issues, technology, politics while the best TED talks tags are psychology, brain, work, culture, humor, love and happiness.
